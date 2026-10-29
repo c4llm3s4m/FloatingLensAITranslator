@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Floating Lens AI Translator</string>
+    <string name="fab_content_description">Floating Lens Capture Button</string>
+    <string name="dismiss_target_text">✕</string>
+    <string name="notification_channel_name">Floating Lens Overlay Service</string>
+    <string name="notification_title">Floating Lens Active</string>
+    <string name="notification_content">Tap floating button to capture screen for translation.</string>
+    <string name="notification_action_stop">Stop Service</string>
+</resources>

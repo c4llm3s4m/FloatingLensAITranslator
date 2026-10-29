@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/fabContainer"
+    android:layout_width="64dp"
+    android:layout_height="64dp"
+    android:background="@drawable/bg_floating_fab"
+    android:elevation="12dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:padding="14dp">
+
+    <ImageView
+        android:id="@+id/fabIcon"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/ic_lens_search"
+        android:contentDescription="@string/fab_content_description"
+        android:scaleType="fitCenter" />
+
+</FrameLayout>
