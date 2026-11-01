@@ -337,7 +337,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
                             refreshState()
                         },
                         label = { Text("PC IP Address") },
-                        placeholder = { Text("10.147.137.213") },
+                        placeholder = { Text("10.23.38.213") },
                         supportingText = { Text("Tap preset below if using Emulator vs Physical Phone:", fontSize = 11.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
@@ -361,14 +361,14 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
 
                         OutlinedButton(
                             onClick = {
-                                val pcIp = "10.147.137.213"
+                                val pcIp = "10.23.38.213"
                                 lmStudioIp = pcIp
                                 modelEngine.lmStudioServerIp = pcIp
                                 refreshState()
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("10.147.137.213 (Wi-Fi)", fontSize = 11.sp)
+                            Text("10.23.38.213 (Wi-Fi)", fontSize = 11.sp)
                         }
                     }
 

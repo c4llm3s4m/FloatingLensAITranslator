@@ -39,7 +39,7 @@ class CompanionModelEngine(private val context: Context) {
         private const val KEY_LM_STUDIO_PORT = "lm_studio_port"
         private const val KEY_LM_STUDIO_MODEL = "lm_studio_model"
 
-        const val DEFAULT_LM_STUDIO_IP = "10.147.137.213"
+        const val DEFAULT_LM_STUDIO_IP = "10.23.38.213"
         const val DEFAULT_LM_STUDIO_PORT = 1234
         const val DEFAULT_LM_STUDIO_MODEL = "webbigdata-alma-7b-ja-v2"
 
