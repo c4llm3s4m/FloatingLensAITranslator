@@ -53,7 +53,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.mediapipe.tasks.genai)
-    implementation(libs.mlkit.translate)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)

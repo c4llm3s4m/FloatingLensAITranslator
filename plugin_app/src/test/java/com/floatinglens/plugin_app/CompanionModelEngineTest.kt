@@ -24,6 +24,7 @@ class CompanionModelEngineTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         engine = CompanionModelEngine(context)
+        engine.useLmStudioServer = false
     }
 
     @Test
@@ -98,11 +99,11 @@ class CompanionModelEngineTest {
 
     @Test
     fun testAutoScanDownloadsWhenNoFileExists() {
-        // Clear any existing test files in app filesDir and download dirs
         context.filesDir.listFiles()?.forEach { it.delete() }
         context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.listFiles()?.forEach { it.delete() }
 
         val freshEngine = CompanionModelEngine(context)
+        freshEngine.useLmStudioServer = false
         val scannedPath = freshEngine.autoScanDownloads()
 
         assertNull(scannedPath)
@@ -112,36 +113,31 @@ class CompanionModelEngineTest {
     }
 
     @Test
-    fun testTaskTranslationExecution() {
-        val testTaskFile = File(context.filesDir, "test_model.task").apply {
-            createNewFile()
-        }
-        engine.loadModel(testTaskFile.absolutePath)
-
+    fun testNoModelLoadedTranslationExecutionReturnsErrorMessage() {
+        engine.useLmStudioServer = false
         val translation = engine.generateTranslation("探してみるか")
         assertNotNull(translation)
-        assertTrue(translation.isNotBlank())
-    }
-
-    @Test
-    fun testGgufTranslationExecution() {
-        val testGgufFile = File(context.filesDir, "test_qwen.gguf").apply {
-            createNewFile()
-        }
-        engine.loadModel(testGgufFile.absolutePath)
-
-        val translation = engine.generateTranslation("探してみるか")
-        assertNotNull(translation)
-        assertTrue(translation.isNotBlank())
+        assertTrue("Should return error message when no model is loaded", translation.contains("Plugin Error"))
     }
 
     @Test
     fun testEmptyInputTranslation() {
-        val testTaskFile = File(context.filesDir, "test_model.task").apply {
-            createNewFile()
-        }
-        engine.loadModel(testTaskFile.absolutePath)
         val translation = engine.generateTranslation("   ")
         assertEquals("", translation)
+    }
+
+    @Test
+    fun testLmStudioPreferences() {
+        engine.useLmStudioServer = true
+        engine.lmStudioServerIp = "192.168.1.100"
+        engine.lmStudioPort = 5000
+        engine.lmStudioModelName = "custom-model"
+
+        assertTrue(engine.useLmStudioServer)
+        assertEquals("192.168.1.100", engine.lmStudioServerIp)
+        assertEquals(5000, engine.lmStudioPort)
+        assertEquals("custom-model", engine.lmStudioModelName)
+        assertEquals("PC LM Studio Local AI Server", engine.getLoadedModelTypeString())
+        assertEquals("Active Engine: PC LM Studio Server [custom-model]", engine.getActiveModelStatusBadgeText())
     }
 }

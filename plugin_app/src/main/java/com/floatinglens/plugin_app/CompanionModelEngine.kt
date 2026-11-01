@@ -3,20 +3,29 @@ package com.floatinglens.plugin_app
 import android.content.Context
 import android.os.Environment
 import android.util.Log
-import com.floatinglens.plugin_app.translation.OfflineTranslationEngine
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
- * Companion Model Engine supporting both Google MediaPipe GenAI (`.task`)
- * and llama.cpp (`.gguf`) LLM model files.
+ * Companion Model Engine supporting Google MediaPipe GenAI (`.task`),
+ * llama.cpp (`.gguf`) LLM model files, and PC LM Studio Server (/v1/completions).
  */
 class CompanionModelEngine(private val context: Context) {
 
     enum class ModelType {
         TASK,
         GGUF,
+        LM_STUDIO,
         UNKNOWN
     }
 
@@ -25,26 +34,127 @@ class CompanionModelEngine(private val context: Context) {
         private const val PREFS_NAME = "companion_model_prefs"
         private const val KEY_SAVED_MODEL_PATH = "saved_model_path"
 
+        private const val KEY_USE_LM_STUDIO = "use_lm_studio"
+        private const val KEY_LM_STUDIO_IP = "lm_studio_ip"
+        private const val KEY_LM_STUDIO_PORT = "lm_studio_port"
+        private const val KEY_LM_STUDIO_MODEL = "lm_studio_model"
+
+        const val DEFAULT_LM_STUDIO_IP = "10.147.137.213"
+        const val DEFAULT_LM_STUDIO_PORT = 1234
+        const val DEFAULT_LM_STUDIO_MODEL = "webbigdata-alma-7b-ja-v2"
+
         const val DEFAULT_GGUF_MODEL_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
         const val DEFAULT_TASK_MODEL_NAME = "model.task"
         const val DEFAULT_MODEL_NAME = DEFAULT_GGUF_MODEL_NAME
         const val NO_MODEL_LOADED_NOTICE = "No .task or .gguf model file loaded yet. Please select your model file in Qwen Companion App"
+
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaTypeOrNull()
     }
 
     private val prefs by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    private val offlineEngine by lazy { OfflineTranslationEngine() }
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .build()
+    }
 
     private var loadedModelPath: String? = null
     private var currentModelType: ModelType = ModelType.UNKNOWN
     private var isInitialized = false
     private var llmInference: LlmInference? = null
 
-    /**
-     * Detect model type from file path extension.
-     */
+    var useLmStudioServer: Boolean
+        get() = prefs.getBoolean(KEY_USE_LM_STUDIO, true)
+        set(value) = prefs.edit().putBoolean(KEY_USE_LM_STUDIO, value).apply()
+
+    var lmStudioServerIp: String
+        get() = prefs.getString(KEY_LM_STUDIO_IP, DEFAULT_LM_STUDIO_IP) ?: DEFAULT_LM_STUDIO_IP
+        set(value) = prefs.edit().putString(KEY_LM_STUDIO_IP, value).apply()
+
+    var lmStudioPort: Int
+        get() = prefs.getInt(KEY_LM_STUDIO_PORT, DEFAULT_LM_STUDIO_PORT)
+        set(value) = prefs.edit().putInt(KEY_LM_STUDIO_PORT, value).apply()
+
+    var lmStudioModelName: String
+        get() = prefs.getString(KEY_LM_STUDIO_MODEL, DEFAULT_LM_STUDIO_MODEL) ?: DEFAULT_LM_STUDIO_MODEL
+        set(value) = prefs.edit().putString(KEY_LM_STUDIO_MODEL, value).apply()
+
+    suspend fun testConnectionDetail(ip: String = lmStudioServerIp, port: Int = lmStudioPort): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val baseUrl = buildBaseUrl(ip, port)
+        val url = "$baseUrl/v1/models"
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .header("Bypass-Tunnel-Reminder", "true")
+            .header("User-Agent", "Mozilla/5.0")
+            .build()
+
+        try {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Pair(true, "Connected!")
+                } else {
+                    Pair(false, "HTTP ${response.code}: ${response.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "LM Studio connection test failed at $url: ${e.message}")
+            Pair(false, e.localizedMessage ?: e.message ?: "Connection failed")
+        }
+    }
+
+    suspend fun testConnection(ip: String = lmStudioServerIp, port: Int = lmStudioPort): Boolean {
+        return testConnectionDetail(ip, port).first
+    }
+
+    private fun buildBaseUrl(rawInput: String, defaultPort: Int): String {
+        var input = rawInput.trim()
+        if (input.isEmpty()) {
+            return "http://$DEFAULT_LM_STUDIO_IP:$defaultPort"
+        }
+
+        input = input.trimEnd('/')
+
+        if (input.startsWith("http://") || input.startsWith("https://")) {
+            return input
+        }
+
+        if (input.contains(".loca.lt") || input.contains(".ngrok") || input.contains(".app") || input.contains(".page") || input.contains(".pub") || input.contains(".dev") || input.contains(".io")) {
+            return "https://$input"
+        }
+
+        val cleanHost = input.removePrefix("http://").removePrefix("https://").trimEnd('/')
+        if (cleanHost.isEmpty()) {
+            return "http://$DEFAULT_LM_STUDIO_IP:$defaultPort"
+        }
+
+        if (cleanHost.contains(":") && !cleanHost.contains("[")) {
+            return "http://$cleanHost"
+        }
+
+        return "http://$cleanHost:$defaultPort"
+    }
+
+    private fun cleanIpAddress(rawIp: String): String {
+        var clean = rawIp.trim()
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .trimEnd('/')
+        if (clean.contains("/")) {
+            clean = clean.substringBefore('/')
+        }
+        if (clean.contains(":") && !clean.contains("[")) {
+            clean = clean.substringBefore(':')
+        }
+        return clean.ifBlank { DEFAULT_LM_STUDIO_IP }
+    }
+
     fun detectModelType(path: String): ModelType {
         val cleanPath = path.lowercase().trim()
         return when {
@@ -54,11 +164,6 @@ class CompanionModelEngine(private val context: Context) {
         }
     }
 
-    /**
-     * Auto-scan common device download directories for .task or .gguf model files.
-     * Searches /sdcard/Download/, /sdcard/Downloads/, context external storage, app dirs.
-     * Automatically selects and loads the detected model file if found.
-     */
     fun autoScanDownloads(): String? {
         Log.i(TAG, "Starting Auto-Scan for device downloads (.task or .gguf model files)...")
 
@@ -104,7 +209,6 @@ class CompanionModelEngine(private val context: Context) {
         }
 
         if (foundFiles.isNotEmpty()) {
-            // Sort by last modified date descending to pick the newest model file
             foundFiles.sortByDescending { it.lastModified() }
             val bestFile = foundFiles.first()
             Log.i(TAG, "Auto-Scan detected model file: ${bestFile.absolutePath}")
@@ -120,17 +224,12 @@ class CompanionModelEngine(private val context: Context) {
         return null
     }
 
-    /**
-     * Initialize and load a .task or .gguf model file.
-     * Can load from specified path, saved preferences, or auto-scan downloads.
-     */
     fun loadModel(modelPath: String? = null): Boolean {
         closeLlmInference()
 
         var targetPath = modelPath?.trim()?.ifEmpty { null }
 
         if (targetPath == null) {
-            // Check saved preference first
             val savedPath = prefs.getString(KEY_SAVED_MODEL_PATH, null)
             if (!savedPath.isNullOrBlank() && File(savedPath).exists()) {
                 targetPath = savedPath
@@ -139,7 +238,6 @@ class CompanionModelEngine(private val context: Context) {
         }
 
         if (targetPath == null) {
-            // Trigger auto-scan downloads if no path provided or saved
             val scannedPath = autoScanDownloads()
             return if (scannedPath != null) {
                 true
@@ -193,6 +291,9 @@ class CompanionModelEngine(private val context: Context) {
                 }
                 return true
             }
+            ModelType.LM_STUDIO -> {
+                return true
+            }
         }
     }
 
@@ -231,29 +332,40 @@ class CompanionModelEngine(private val context: Context) {
     }
 
     fun isLoaded(): Boolean {
+        if (useLmStudioServer) return true
         val path = loadedModelPath
         return isInitialized && path != null && File(path).exists()
     }
 
-    fun getLoadedModelPath(): String = loadedModelPath ?: "None"
+    fun getLoadedModelPath(): String {
+        if (useLmStudioServer) {
+            return "http://${cleanIpAddress(lmStudioServerIp)}:$lmStudioPort ($lmStudioModelName)"
+        }
+        return loadedModelPath ?: "None"
+    }
 
     fun getLoadedModelFilename(): String {
+        if (useLmStudioServer) return lmStudioModelName
         return loadedModelPath?.let { File(it).name } ?: "None"
     }
 
-    fun getLoadedModelType(): ModelType = currentModelType
+    fun getLoadedModelType(): ModelType = if (useLmStudioServer) ModelType.LM_STUDIO else currentModelType
 
     fun getLoadedModelTypeString(): String {
+        if (useLmStudioServer) return "PC LM Studio Local AI Server"
         if (!isLoaded()) return "None / Unloaded"
         return when (currentModelType) {
             ModelType.TASK -> "Google MediaPipe GenAI (.task)"
             ModelType.GGUF -> "llama.cpp GGUF (.gguf)"
+            ModelType.LM_STUDIO -> "PC LM Studio Local AI Server"
             ModelType.UNKNOWN -> "Auto-detect / Fallback"
         }
     }
 
     fun getStatusMessage(): String {
-        return if (isLoaded()) {
+        return if (useLmStudioServer) {
+            "Active Engine: PC LM Studio Server at http://${cleanIpAddress(lmStudioServerIp)}:$lmStudioPort [$lmStudioModelName]"
+        } else if (isLoaded()) {
             "Loaded model file: ${getLoadedModelFilename()} ($loadedModelPath)"
         } else {
             NO_MODEL_LOADED_NOTICE
@@ -261,57 +373,107 @@ class CompanionModelEngine(private val context: Context) {
     }
 
     fun getActiveModelStatusBadgeText(): String {
-        return if (isLoaded()) {
+        return if (useLmStudioServer) {
+            "Active Engine: PC LM Studio Server [$lmStudioModelName]"
+        } else if (isLoaded()) {
             "Active Model Status: Loaded [${getLoadedModelFilename()}]"
         } else {
             "Active Model Status: Waiting for Model Selection"
         }
     }
 
-    /**
-     * Delegate method for translating text (alias to generateTranslation).
-     */
     fun translateText(sourceText: String, sourceLang: String = "ja", targetLang: String = "en"): String {
         return generateTranslation(sourceText, sourceLang, targetLang)
     }
 
-    /**
-     * Execute translation prompt using loaded MediaPipe .task or GGUF model,
-     * or fall back to OfflineTranslationEngine (ML Kit Translate).
-     */
     fun generateTranslation(sourceText: String, sourceLang: String = "ja", targetLang: String = "en"): String {
         if (sourceText.isBlank()) return ""
 
-        val prompt = "Translate the following Japanese text to English: $sourceText"
-        Log.d(TAG, "Inference request ($sourceLang -> $targetLang) [Type: $currentModelType]: $prompt")
+        // Strip all newline characters (\n) and extra spaces so vertical Japanese columns form a single continuous string
+        val cleanText = sourceText.replace("\r", "").replace("\n", "").trim()
+        if (cleanText.isBlank()) return ""
 
-        // 1. If MediaPipe LlmInference or AI model is loaded, run inference on the specific sourceText
-        llmInference?.let { engine ->
-            try {
-                val translation = engine.generateResponse(prompt)
-                if (!translation.isNullOrBlank()) {
-                    Log.i(TAG, "MediaPipe LlmInference response for '$sourceText': $translation")
-                    return translation.trim()
+        // 1. If LM Studio Local AI Server is toggled ON, send HTTP POST request to /v1/completions
+        if (useLmStudioServer) {
+            return runBlocking {
+                try {
+                    translateViaLmStudio(cleanText)
+                } catch (e: Exception) {
+                    val errorText = "[LM Studio Error: ${e.message ?: "Failed to connect to LM Studio"}]"
+                    Log.e(TAG, errorText, e)
+                    errorText
                 }
-            } catch (e: Throwable) {
-                Log.e(TAG, "Error executing MediaPipe LlmInference generateResponse for '$sourceText': ${e.message}", e)
             }
         }
 
-        // 2. If no AI model is loaded or if LlmInference failed, fall back to OfflineTranslationEngine (ML Kit Translate)
-        Log.d(TAG, "Falling back to OfflineTranslationEngine (ML Kit) for sourceText: '$sourceText'")
-        return try {
-            runBlocking {
-                val offlineResult = offlineEngine.translate(sourceText, sourceLang, targetLang)
-                if (offlineResult.isNotBlank()) {
-                    offlineResult
-                } else {
-                    sourceText
+        // 2. On-Device Qwen Model (.task / .gguf) with ChatML Prompt Formatting
+        llmInference?.let { engine ->
+            try {
+                val chatMlPrompt = "<|im_start|>system\nTranslate this Japanese manga text into natural English. Output ONLY the English translation.<|im_end|>\n<|im_start|>user\n$cleanText<|im_end|>\n<|im_start|>assistant\n"
+                val translation = engine.generateResponse(chatMlPrompt)
+                if (!translation.isNullOrBlank()) {
+                    return translation.trim()
+                }
+            } catch (e: Throwable) {
+                val errorText = "[Plugin Error: ${e.message ?: "Inference error"}]"
+                Log.e(TAG, errorText, e)
+                return errorText
+            }
+        }
+
+        val noModelError = "[Plugin Error: No .task or .gguf model file loaded]"
+        Log.w(TAG, noModelError)
+        return noModelError
+    }
+
+    private suspend fun translateViaLmStudio(cleanText: String): String = withContext(Dispatchers.IO) {
+        val baseUrl = buildBaseUrl(lmStudioServerIp, lmStudioPort)
+        val url = "$baseUrl/v1/completions"
+
+        val promptString = "Translate this from Japanese into English:\nJapanese: $cleanText\nEnglish:"
+
+        val payload = JSONObject().apply {
+            put("model", lmStudioModelName)
+            put("prompt", promptString)
+            put("temperature", 0.1)
+            put("max_tokens", 128)
+            put("stop", JSONArray().apply {
+                put("\n")
+                put("Japanese:")
+            })
+        }
+
+        val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .header("Bypass-Tunnel-Reminder", "true")
+            .header("User-Agent", "Mozilla/5.0")
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        try {
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string()
+                Log.e(TAG, "LM Studio /v1/completions error ${response.code}: $errorBody")
+                throw Exception("HTTP ${response.code}: ${response.message}")
+            }
+
+            val responseBodyStr = response.body?.string()
+                ?: throw Exception("Empty response body from LM Studio server")
+
+            val jsonResponse = JSONObject(responseBodyStr)
+            val choices = jsonResponse.optJSONArray("choices")
+            if (choices != null && choices.length() > 0) {
+                val choiceObj = choices.getJSONObject(0)
+                val text = choiceObj.optString("text")?.trim()
+                if (!text.isNullOrBlank()) {
+                    return@withContext text
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "OfflineTranslationEngine translation error for '$sourceText': ${e.message}")
-            sourceText
+            throw Exception("No choice text returned in completion response")
+        } finally {
+            response.close()
         }
     }
 }

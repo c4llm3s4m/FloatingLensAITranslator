@@ -27,17 +27,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -64,6 +69,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PluginAppScreen(modelEngine: CompanionModelEngine) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     var isLoadedState by remember { mutableStateOf(modelEngine.isLoaded()) }
     var loadedPathState by remember { mutableStateOf(modelEngine.getLoadedModelPath()) }
@@ -78,6 +84,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
     var inputText by remember { mutableStateOf("探してみるか") }
     var resultText by remember { mutableStateOf("") }
     var lastPromptSent by remember { mutableStateOf("") }
+    var isTranslating by remember { mutableStateOf(false) }
 
     fun refreshState() {
         isLoadedState = modelEngine.isLoaded()
@@ -125,7 +132,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
         )
 
         Text(
-            text = "Supports Google MediaPipe GenAI (.task) & llama.cpp (.gguf)",
+            text = "Supports On-Device (.task / .gguf) & PC LM Studio Local AI Server",
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.secondary,
@@ -202,7 +209,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Supported Formats:",
+                    text = "Supported Formats & Services:",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp
                 )
@@ -215,7 +222,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
                         color = MaterialTheme.colorScheme.primaryContainer
                     ) {
                         Text(
-                            text = ".task (MediaPipe GenAI)",
+                            text = ".task (MediaPipe)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -235,12 +242,25 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer
+                    ) {
+                        Text(
+                            text = "LM Studio PC",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Active Model Path:",
+                    text = "Active Target / Path:",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp
                 )
@@ -267,7 +287,166 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Model Picker, Auto-Scan & Load Section
+        // PC LM Studio Local AI Server Card (Above On-Device Model Selection)
+        var useLmStudio by remember { mutableStateOf(modelEngine.useLmStudioServer) }
+        var lmStudioIp by remember { mutableStateOf(modelEngine.lmStudioServerIp) }
+        var lmStudioPortStr by remember { mutableStateOf(modelEngine.lmStudioPort.toString()) }
+        var lmStudioModel by remember { mutableStateOf(modelEngine.lmStudioModelName) }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "PC LM Studio Local AI Server",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = "Route translation requests to LM Studio on PC",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = useLmStudio,
+                        onCheckedChange = { checked ->
+                            useLmStudio = checked
+                            modelEngine.useLmStudioServer = checked
+                            refreshState()
+                        }
+                    )
+                }
+
+                if (useLmStudio) {
+                    OutlinedTextField(
+                        value = lmStudioIp,
+                        onValueChange = {
+                            lmStudioIp = it
+                            modelEngine.lmStudioServerIp = it
+                            refreshState()
+                        },
+                        label = { Text("PC IP Address") },
+                        placeholder = { Text("10.147.137.213") },
+                        supportingText = { Text("Tap preset below if using Emulator vs Physical Phone:", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val emuIp = "10.0.2.2"
+                                lmStudioIp = emuIp
+                                modelEngine.lmStudioServerIp = emuIp
+                                refreshState()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("10.0.2.2 (Emulator)", fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val pcIp = "10.147.137.213"
+                                lmStudioIp = pcIp
+                                modelEngine.lmStudioServerIp = pcIp
+                                refreshState()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("10.147.137.213 (Wi-Fi)", fontSize = 11.sp)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = lmStudioPortStr,
+                            onValueChange = {
+                                lmStudioPortStr = it
+                                it.toIntOrNull()?.let { port ->
+                                    modelEngine.lmStudioPort = port
+                                    refreshState()
+                                }
+                            },
+                            label = { Text("Port") },
+                            placeholder = { Text("1234") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = lmStudioModel,
+                            onValueChange = {
+                                lmStudioModel = it
+                                modelEngine.lmStudioModelName = it
+                                refreshState()
+                            },
+                            label = { Text("Model Name") },
+                            placeholder = { Text("webbigdata-alma-7b-ja-v2") },
+                            modifier = Modifier.weight(2f),
+                            singleLine = true
+                        )
+                    }
+
+                    var testStatus by remember { mutableStateOf<String?>(null) }
+                    var isTesting by remember { mutableStateOf(false) }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isTesting = true
+                                    testStatus = null
+                                    val portInt = lmStudioPortStr.toIntOrNull() ?: 1234
+                                    val (success, detailMsg) = modelEngine.testConnectionDetail(lmStudioIp, portInt)
+                                    isTesting = false
+                                    testStatus = if (success) "Connected!" else "Failed: $detailMsg"
+                                }
+                            },
+                            enabled = !isTesting
+                        ) {
+                            Text(if (isTesting) "Testing..." else "Test Connection")
+                        }
+
+                        testStatus?.let { status ->
+                            val color = if (status.contains("Connected")) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                            Text(
+                                text = status,
+                                color = color,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f, fill = false).padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Model Picker, Auto-Scan & Load Section (On-Device)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -277,7 +456,7 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Model Selection & Auto-Scan",
+                    text = "On-Device Model Selection & Auto-Scan",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
@@ -399,13 +578,23 @@ fun PluginAppScreen(modelEngine: CompanionModelEngine) {
 
         Button(
             onClick = {
-                val promptFormatted = "Translate the following Japanese manga text to English accurately: $inputText"
-                lastPromptSent = promptFormatted
-                resultText = modelEngine.generateTranslation(inputText, "ja", "en")
+                coroutineScope.launch {
+                    isTranslating = true
+                    val cleanText = inputText.replace("\r", "").replace("\n", "").trim()
+                    val promptFormatted = if (modelEngine.useLmStudioServer) {
+                        "Translate this from Japanese into English:\nJapanese: $cleanText\nEnglish:"
+                    } else {
+                        "<|im_start|>system\nTranslate this Japanese manga text into natural English. Output ONLY the English translation.<|im_end|>\n<|im_start|>user\n$cleanText<|im_end|>\n<|im_start|>assistant\n"
+                    }
+                    lastPromptSent = promptFormatted
+                    resultText = modelEngine.generateTranslation(inputText, "ja", "en")
+                    isTranslating = false
+                }
             },
+            enabled = !isTranslating,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Translate via Active AI Engine")
+            Text(if (isTranslating) "Translating..." else "Translate via Active AI Engine")
         }
 
         if (resultText.isNotBlank()) {

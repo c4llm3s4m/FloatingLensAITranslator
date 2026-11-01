@@ -26,6 +26,10 @@ class QwenCompanionServiceTest {
     fun setUp() {
         controller = Robolectric.buildService(QwenCompanionService::class.java)
         service = controller.create().get()
+        val engine = CompanionModelEngine(service).apply {
+            useLmStudioServer = false
+        }
+        service.setModelEngineForTest(engine)
         val binder = service.onBind(Intent("com.floatinglens.plugin.TRANSLATE_SERVICE"))
         assertNotNull(binder)
         plugin = ITranslationPlugin.Stub.asInterface(binder)

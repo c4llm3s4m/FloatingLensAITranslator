@@ -31,6 +31,10 @@ class QwenCompanionService : Service() {
         modelEngine.loadModel()
     }
 
+    fun setModelEngineForTest(engine: CompanionModelEngine) {
+        modelEngine = engine
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
